@@ -1,0 +1,13 @@
+﻿{
+  "Line": {
+    "NotifyToken": "<token>",
+    "Url": "https://notify-api.line.me/api/notify"
+  },
+  "FxRate": {
+    "CurrencyPair": "USDJPY",
+    "Url": "https://www.gaitameonline.com/rateaj/getrate"
+  },
+  "MySql": {
+    "DefaultConnection": "<connection string>"
+  },
+}
