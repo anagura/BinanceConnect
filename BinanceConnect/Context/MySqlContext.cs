@@ -7,8 +7,8 @@ namespace BinanceConnect.Context
 	//DbContext（DBとクラス情報をマップする）
 	public class MySqlContext : DbContext
 	{
-		public DbSet<PriceStats> PriceStats { get; set; }
-		public DbSet<PriceStatsMinutes> PriceStatsMinutes { get; set; }
+		public DbSet<PriceStatsSecond> PriceStatsSecond { get; set; }
+		public DbSet<PriceStatsMinute> PriceStatsMinute { get; set; }
 
 		protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
 		{

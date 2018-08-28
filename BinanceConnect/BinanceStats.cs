@@ -6,6 +6,7 @@ using BinanceConnect.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace BinanceConnect
 {
@@ -13,18 +14,27 @@ namespace BinanceConnect
 	{
 
 		private readonly MySqlContext _context;
-		private DepthWebSocketCache _webSocketCache;
+		private SymbolStatisticsWebSocketCache _webSocketCache;
 		private static readonly bool _isDebug = false;
 
 		private static readonly int _notifySpan = 60 * 5;    // 5分
 		private static readonly decimal _limit = (decimal)0.5;
 
+		private DateTime _lastNotifyTime;
+		private PriceStatsMinute _lastMinutePrice;
+		private List<PriceStatsSecond> _pricesSeconds;
+		private Queue<PriceStatsMinute> _priceMinutes;
+
 		public BinanceStats()
 		{
+			_lastMinutePrice = new PriceStatsMinute();
+			_pricesSeconds = new List<PriceStatsSecond>();
+			_priceMinutes = new Queue<PriceStatsMinute>();
+
 			_context = new MySqlContext();
 
 			// Initialize web socket cache (with automatic streaming).
-			_webSocketCache = new DepthWebSocketCache();
+			_webSocketCache = new SymbolStatisticsWebSocketCache();
 
 			// Handle error events.
 			_webSocketCache.Error += (s, e) => { Console.WriteLine(e.Exception.Message); };
@@ -32,100 +42,55 @@ namespace BinanceConnect
 
 		public void Start()
 		{
-			int minutes = -1;
-			int idx = 0;
-			Queue<decimal> minutesList = new Queue<decimal>();
-			Dictionary<int, decimal> prices = new Dictionary<int, decimal>();
-
-			Symbol symbol;
-			decimal topAskPrice = 0;
-			decimal topBidPrice = 0;
-			decimal currentSecondPrice = 0;
-			decimal currentMinutePrice = 0;
-			PriceStats stats = new PriceStats();
-			PriceStatsMinutes minutesStats = new PriceStatsMinutes();
-			DateTime lastNotifyTime = DateTime.Now;
-
+			_pricesSeconds.Clear();
+			_priceMinutes.Clear();
 			using (var context = new MySqlContext())
 			{
-				// Subscribe callback to BTC/USDT (automatically begin streaming).
-				_webSocketCache.Subscribe(Symbol.BTC_USDT, async evt =>
+				int lastMinute = DateTime.Now.Minute;
+				string symbol = string.Empty;
+				var statInfo = new PriceStatsSecond();
+
+				_webSocketCache.Subscribe(async evt =>
 				{
-					// Get symbol from cache (update cache if a symbol is missing).
-					symbol = Symbol.Cache.Get(evt.OrderBook.Symbol);
-
-					topAskPrice = evt.OrderBook.Top.Ask.Price;
-					topBidPrice = evt.OrderBook.Top.Bid.Price;
-
-					// Handle order book update events.
-					//Console.WriteLine(string.Format("{0}, {1}", topAskPrice, topBidPrice));
 					var now = DateTime.Now;
-					stats.Name = "BTC_USDT";
-					stats.Ask = topAskPrice;
-					stats.Bid = topBidPrice;
-					stats.CreateTime = now;
-					currentSecondPrice = (topAskPrice + topBidPrice) / 2;
-					prices.Add(idx++, currentSecondPrice);
-
-					// 分処理
-					if (now.Minute != minutes && prices.Any())
+					foreach (var stat in evt.Statistics)
 					{
-						var average = Math.Round(prices.Values.Select(x => x).Average(), 2);
-						decimal minutesDiff = 0;
-						if (minutesList.Count() > 0)
-						{
-							var min = minutesList.Min();
-							var max = minutesList.Max();
-
-							var minutesMinDiff = Math.Round(100 - ((min / currentMinutePrice) * 100), 3);
-							var minutesMaxDiff = Math.Round(100 - ((max / currentMinutePrice) * 100), 3);
-							var msg = string.Format("[m][{5}] min:{0}, max:{1}, current:{2}, min_diff:{3}, max_diff{4}", min, max, currentMinutePrice, minutesMinDiff, minutesMaxDiff, now);
-							//							Console.WriteLine(msg);
-
-							// 差が大きい方を採用
-							minutesDiff = Math.Abs(minutesMinDiff) > Math.Abs(minutesMaxDiff) ? minutesMinDiff : minutesMaxDiff;
-							if (Math.Abs(minutesDiff) >= _limit)
-							{
-								if ((now - lastNotifyTime).TotalSeconds > _notifySpan)
-								{
-									var lineMsg = string.Format("ビットコインに値動きがありました。${1}({0}%)\n{2:#,0} 円",
-									minutesDiff, currentMinutePrice, (int)(currentMinutePrice * FxRate.Rate));
-									Console.WriteLine(lineMsg);
-									var result = await LineNotify.Send(lineMsg);
-
-									// 1度通知したら暫く通知を停止する
-									lastNotifyTime = DateTime.Now;
-								}
-							}
-						}
-						// 5分チェック用
-						minutesList.Enqueue(average);
-						if (minutesList.Count > 5)
-						{
-							minutesList.Dequeue();
-						}
-
-						minutesStats.Name = "BTC_USDT";
-						minutesStats.Price = average;
-						minutesStats.Diff = minutesDiff;
-						minutesStats.CreateTime = now;
-						if (!_isDebug)
-						{
-							await _context.PriceStatsMinutes.AddAsync(minutesStats);
-						}
-						idx = 0;
-						prices.Clear();
-						currentMinutePrice = average;
+						symbol = stat.Symbol;
+						statInfo.Name = symbol;
+						statInfo.LastPrice = stat.LastPrice;
+						statInfo.Ask = stat.AskPrice;
+						statInfo.AskQuantity = stat.AskQuantity;
+						statInfo.Bid = stat.BidPrice;
+						statInfo.BidQuantity = stat.BidQuantity;
+						statInfo.CreateTime = now;
 					}
-					minutes = stats.CreateTime.Minute;
-					//Console.WriteLine(string.Format("ask:{0}, bid:{1}", topAskPrice * _fxRate, topBidPrice * _fxRate));
+					_pricesSeconds.Add(statInfo.DeepCopy());
 					if (!_isDebug)
 					{
-						await _context.PriceStats.AddAsync(stats);
+						await _context.PriceStatsSecond.AddAsync(statInfo);
+					}
+
+					// 秒単位の通知処理
+					if (_lastMinutePrice.LastPrice > 0)
+					{
+						var secondDiff = Math.Round(100 - ((statInfo.LastPrice / _lastMinutePrice.LastPrice) * 100), 3);
+						await NotifyIfLimitOver(secondDiff, now, statInfo.LastPrice, statInfo.AskQuantity, statInfo.BidQuantity, "秒");
+					}
+
+					// 分処理
+					if (now.Minute != lastMinute && _pricesSeconds.Any())
+					{
+						await Minute(statInfo.Name, now);
+					}
+
+					if (!_isDebug)
+					{
 						await _context.SaveChangesAsync();
 					}
 
-				});
+					lastMinute = now.Minute;
+
+				}, new string[] { Symbol.BTC_USDT });
 			}
 		}
 
@@ -137,6 +102,82 @@ namespace BinanceConnect
 			}
 
 			_webSocketCache.Unsubscribe();
+		}
+
+		/// <summary>
+		/// 分ごとの処理
+		/// </summary>
+		/// <param name="symbol"></param>
+		/// <param name="now"></param>
+		/// <returns></returns>
+		private async Task<bool> Minute(string symbol, DateTime now)
+		{
+			var currentMinutePrice = _pricesSeconds.Average(x => x.LastPrice);
+			_lastMinutePrice.Name = symbol;
+			_lastMinutePrice.LastPrice = currentMinutePrice;
+			_lastMinutePrice.Ask = _pricesSeconds.Average(x => x.Ask);
+			_lastMinutePrice.AskQuantity = _pricesSeconds.Sum(x => x.AskQuantity);
+			_lastMinutePrice.Bid = _pricesSeconds.Average(x => x.Bid);
+			_lastMinutePrice.BidQuantity = _pricesSeconds.Sum(x => x.BidQuantity);
+			_lastMinutePrice.CreateTime = now;
+
+
+			if (_priceMinutes.Any())
+			{
+				var min = _priceMinutes.Min(x => x.LastPrice);
+				var max = _priceMinutes.Max(x => x.LastPrice);
+
+				var minutesMinDiff = Math.Round(100 - ((min / currentMinutePrice) * 100), 3);
+				var minutesMaxDiff = Math.Round(100 - ((max / currentMinutePrice) * 100), 3);
+				var minutesDiff = Math.Abs(minutesMinDiff) > Math.Abs(minutesMaxDiff) ? minutesMinDiff : minutesMaxDiff;
+				await NotifyIfLimitOver(minutesDiff, now, currentMinutePrice, _lastMinutePrice.AskQuantity, _lastMinutePrice.BidQuantity, "分");
+				_lastMinutePrice.Diff = minutesDiff;
+			}
+
+			_pricesSeconds.Clear();
+			_priceMinutes.Enqueue(_lastMinutePrice.DeepCopy());
+			if (_priceMinutes.Count > 5)
+			{
+				_priceMinutes.Dequeue();
+			}
+			if (!_isDebug)
+			{
+				await _context.PriceStatsMinute.AddAsync(_lastMinutePrice);
+			}
+
+			return true;
+		}
+
+		/// <summary>
+		/// 閾値以上の変動があったら通知する
+		/// </summary>
+		/// <param name="diff"></param>
+		/// <param name="now"></param>
+		/// <param name="currentPrice"></param>
+		/// <param name="askQuantity"></param>
+		/// <param name="bidQuantity"></param>
+		/// <param name="prefix"></param>
+		/// <returns></returns>
+		private async Task<string> NotifyIfLimitOver(decimal diff, DateTime now, decimal currentPrice, decimal askQuantity, decimal bidQuantity, string prefix)
+		{
+			string result = string.Empty;
+
+			if (Math.Abs(diff) >= _limit)
+			{
+				if (_lastNotifyTime == null || (now - _lastNotifyTime).TotalSeconds > _notifySpan)
+				{
+					// 1度通知したら暫く通知を停止する
+					_lastNotifyTime = DateTime.Now;
+
+					var lineMsg = string.Format("[{5}]ビットコインに値動きがありました。${1}({0}%)\n{2:#,0} 円\n[注文量]\n買↑:{3}\n売↓:{4}",
+					diff, currentPrice.ToString("#.##"), (int)(currentPrice * FxRate.Rate),
+					askQuantity, bidQuantity, prefix);
+					Console.WriteLine(lineMsg);
+					result = await LineNotify.Send(lineMsg);
+				}
+			}
+
+			return result;
 		}
 	}
 }
