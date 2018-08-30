@@ -73,7 +73,7 @@ namespace BinanceConnect
 					// 秒単位の通知処理
 					if (_lastMinutePrice.LastPrice > 0)
 					{
-						var secondDiff = Math.Round(100 - ((statInfo.LastPrice / _lastMinutePrice.LastPrice) * 100), 3);
+						var secondDiff = Math.Round(100 - ((_lastMinutePrice.LastPrice / statInfo.LastPrice) * 100), 3);
 						await NotifyIfLimitOver(secondDiff, now, statInfo.LastPrice, statInfo.AskQuantity, statInfo.BidQuantity, "秒");
 					}
 
