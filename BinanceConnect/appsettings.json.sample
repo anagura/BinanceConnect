@@ -1,6 +1,6 @@
 ﻿{
   "Line": {
-    "NotifyToken": "<token>",
+    "NotifyToken": ["<token>","<token>","<token>"],
     "Url": "https://notify-api.line.me/api/notify"
   },
   "FxRate": {

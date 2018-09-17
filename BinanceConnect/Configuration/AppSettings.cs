@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using System.IO;
+using System.Linq;
 
 namespace BinanceConnect.Configuration
 {
@@ -10,7 +11,7 @@ namespace BinanceConnect.Configuration
 		public static string FxCurrecyPair { get; private set; }
 		public static string FxRateUrl { get; private set; }
 
-		public static string LineNotifyToken { get; private set; }
+		public static string[] LineNotifyToken { get; private set; }
 		public static string LineNotifyUrl { get; private set; }
 
 		public static string DefaultConnection { get; private set; }
@@ -23,8 +24,8 @@ namespace BinanceConnect.Configuration
 					.AddJsonFile("appsettings.json", true, false)
 					.Build();
 
-			LineNotifyToken = Configuration.GetSection("Line")["NotifyToken"];
-			LineNotifyUrl = Configuration.GetSection("Line")["Url"];
+            LineNotifyToken = Configuration.GetSection("Line").GetSection("NotifyToken").GetChildren().Select(x => x.Value).ToArray();
+            LineNotifyUrl = Configuration.GetSection("Line")["Url"];
 
 			FxCurrecyPair = Configuration.GetSection("FxRate")["CurrencyPair"];
 			FxRateUrl = Configuration.GetSection("FxRate")["Url"];

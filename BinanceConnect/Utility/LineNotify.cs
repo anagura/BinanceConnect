@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using System.Web;
+using System.Security.Principal;
 
 namespace BinanceConnect
 {
@@ -11,9 +12,9 @@ namespace BinanceConnect
 		private static LineNotify _lineNotify;
 
 		private readonly string _url = null;
-		private readonly string _token = null;
+		private readonly string[] _token = null;
 
-		public LineNotify(string url, string token)
+		public LineNotify(string url, string[] token)
 		{
 			_url = url;
 			_token = token;
@@ -42,17 +43,19 @@ namespace BinanceConnect
 				return null;
 			}
 
-			string response;
-			using (var wc = new WebClient())
-			{
-				wc.Encoding = Encoding.UTF8;
-				wc.Headers.Add("Content-Type", "application/x-www-form-urlencoded");
-				wc.Headers.Add("Authorization", "Bearer " + _token);
-				var payload = "message=" + HttpUtility.UrlEncode(message, Encoding.UTF8);
-				response = await wc.UploadStringTaskAsync(_url, payload);
-			}
-
-			return response;
+            string response = string.Empty;
+            var payload = "message=" + HttpUtility.UrlEncode(message, Encoding.UTF8);
+            foreach (var notifyToken in _token)
+            {
+                using (var wc = new WebClient())
+                {
+                    wc.Encoding = Encoding.UTF8;
+                    wc.Headers.Add("Content-Type", "application/x-www-form-urlencoded");
+                    wc.Headers.Add("Authorization", "Bearer " + notifyToken);
+                    response = await wc.UploadStringTaskAsync(_url, payload);
+                }
+            }
+            return response;
 		}
 	}
 }
