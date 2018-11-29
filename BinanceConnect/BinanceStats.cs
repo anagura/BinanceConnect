@@ -18,12 +18,25 @@ namespace BinanceConnect
 		private static readonly bool _isDebug = false;
 
 		private static readonly int _notifySpan = 60 * 5;    // 5分
-		private static readonly decimal _limit = (decimal)0.5;
+		private static decimal _limit = (decimal)0.5;
 
 		private DateTime _lastNotifyTime;
 		private PriceStatsMinute _lastMinutePrice;
 		private List<PriceStatsSecond> _pricesSeconds;
 		private Queue<PriceStatsMinute> _priceMinutes;
+
+		public decimal NoticeLimit
+		{
+			get
+			{
+				return _limit;
+			}
+
+			set
+			{
+				_limit = value;
+			}
+		}
 
 		public BinanceStats()
 		{

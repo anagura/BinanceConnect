@@ -22,7 +22,7 @@ namespace BinanceConnect
 			BinanceStats binance = new BinanceStats();
 			binance.Start();
 
-			SuperLoop();
+			SuperLoop(binance);
 
 			binance.End();
 		}
@@ -31,7 +31,7 @@ namespace BinanceConnect
 		/// メッセージループ
 		/// </summary>
 		/// <param name="token"></param>
-		private static void SuperLoop(CancellationToken token = default)
+		private static void SuperLoop(BinanceStats binance, CancellationToken token = default)
 		{
 			do
 			{
@@ -49,6 +49,34 @@ namespace BinanceConnect
 						stdin.Equals("exit", StringComparison.OrdinalIgnoreCase))
 					{
 						break;
+					}
+					else if (stdin.StartsWith("limit", StringComparison.OrdinalIgnoreCase))
+					{
+						var args = stdin.Split(' ');
+
+						decimal value = 0;
+						if (args.Length > 1)
+						{
+							try
+							{
+								value = Convert.ToDecimal(args[1]);
+								if (value > 0)
+								{
+									binance.NoticeLimit = value;
+									Console.WriteLine(string.Format("limit set to {0}", binance.NoticeLimit));
+								}
+							}
+							catch (FormatException)
+							{
+								Console.WriteLine(string.Format("FormatException {0}", args[1]));
+							}
+						}
+						else
+						{
+							Console.WriteLine(string.Format("limit is {0}", binance.NoticeLimit));
+						}
+
+						continue;
 					}
 				}
 				catch (Exception e)
